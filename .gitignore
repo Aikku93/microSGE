@@ -1,0 +1,6 @@
+example/build/*
+example/*.elf
+example/*.gba
+example/*.sav
+libusge/build/*
+libusge/lib/*
