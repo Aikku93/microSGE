@@ -334,9 +334,14 @@ ASM_ALIGN(4)
 	CMP	r6, #0x00                 @ One-shot samples are looped while mixing
 	BNE	0f
 	MOV	r6, #USGE_WAV_MIN_LOOP
-0:	LSR	r7, r0, #(16+USGE_FRACBITS-3)
-	MOV	lr, r7                    @ Rewind DataPtr by (int)(Phase*8), because the mixer
-	SUB	r1, r7                    @ will pre-increment by that amount
+0:	MOV	lr, r1                    @ Save original DataPtr -> lr
+	LSL	r7, r0, #0x10             @ Rewind DataPtr by (int)(Rate*8) (mixer pre-increments)
+	LSR	r7, #(16+USGE_FRACBITS)
+	SUB	r1, r7
+	LSL	r7, r0, #(32-USGE_FRACBITS+3)
+	SUB	r0, r7                    @ Phase -= Rate*8? (again, mixer pre-increments)
+	SBC	r7, r7                    @  Needed borrow bit: Rewind another sample
+	ADD	r1, r7
 	MOV	r7, r8                    @ Store to voice table
 #if USGE_STEREOMIX
 	STMIA	r7!, {r0-r3,r5-r6}
@@ -347,7 +352,7 @@ ASM_ALIGN(4)
 	ADD	r7, #0x08
 #endif
 	MOV	r8, r7
-	ADD	r1, lr                    @ Restore original DataPtr
+	MOV	r1, lr                    @ Restore original DataPtr
 
 .LVoxUpdate_CheckEGDecay:
 #if USGE_GENERATE_ENVELOPE
@@ -368,14 +373,14 @@ ASM_ALIGN(4)
 #endif
 
 .LVoxUpdate_StoreToVoxStruct:
-	LSR	r3, r0, #0x10             @ Offs -> r3
-	LSL	r2, r0, #0x10             @ Rate -> r2
+	LSR	r3, r0, #(32-USGE_FRACBITS)
+	LSL	r2, r0, #0x10             @ Rate -> r2, Offs -> r3
 	LSR	r2, #0x10
 	LDR	r7, [sp, #0x0C]           @ N -> r7
 	MUL	r7, r2                    @ SampsThisUpdate = Floor[N * Rate + Offs] -> r7
 	ADD	r7, r3
 	LSL	r6, r7, #(32-USGE_FRACBITS)
-	LSR	r6, #(32-USGE_FRACBITS)   @ Store next phase offset
+	LSR	r6, #0x10                 @ Store next phase offset
 	STRH	r6, [r4, #0x0A]
 	LSR	r7, #USGE_FRACBITS
 	ADD	r1, r7                    @ DataPtr += SampsThisUpdate
@@ -395,10 +400,16 @@ ASM_ALIGN(4)
 
 .LVoxUpdate_ClipRate:
 	LSR	r0, #0x10                 @ Rate = MAX_RATE
+#if (USGE_FRACBITS == 14)
+	ADD	r0, #0x01
+	LSL	r0, #0x10
+	SUB	r0, #0x01
+#else
 	LSL	r0, #0x10
 	MOV	r1, #0x04
 	LSL	r1, #USGE_FRACBITS
 	ORR	r0, r1
+#endif
 	B	.LVoxUpdate_ClipRate_Return
 
 .LVoxUpdate_SampleEnds:

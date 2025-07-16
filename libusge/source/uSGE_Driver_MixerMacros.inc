@@ -49,15 +49,16 @@ struct StereoMixerEntry_t {
 
 /************************************************/
 
-#define OFFSET_OF_LDRSB_FROM_START   (0x04 * 6) //! ADR,LDMIA,ADD,BIC,ADD,STMIA
+#define OFFSET_OF_ADC_FROM_START     (0x04 * 3) //! ADR,LDMIA,ADDS
+#define OFFSET_OF_LDRSB_FROM_START   (0x04 * 5) //! ADR,LDMIA,ADDS,ADC,STMIA
 #define OFFSET_OF_MLANE_FROM_LDRSB   (0x04 * 3) //! LDRSB,LDRSB,ADDS
 
 #if USGE_STEREOMIX
 # define STRIDE_BETWEEN_SAMPLE_PAIRS (0x04 * 5) //! LDRSB,LDRSB,ADDS,MLANE,MLANE
-# define STRIDE_BETWEEN_VOICES       (0x04 * 26)
+# define STRIDE_BETWEEN_VOICES       (0x04 * 25)
 #else
 # define STRIDE_BETWEEN_SAMPLE_PAIRS (0x04 * 4) //! LDRSB,LDRSB,ADDS,MLANE
-# define STRIDE_BETWEEN_VOICES       (0x04 * 22)
+# define STRIDE_BETWEEN_VOICES       (0x04 * 21)
 #endif
 
 #if (USGE_MAX_VOICES <= 8)
@@ -122,9 +123,8 @@ struct StereoMixerEntry_t {
 #else
 	LDMIA	fp, {r9,sl,ip}                        @ Rate | Pos<<16 -> r9, DataPtr -> sl, Volume -> ip
 #endif
-	ADD	sl, sl, r9, lsr #(16+USGE_FRACBITS-3) @ SrcData = (DataPtr += (int)Pos)
-	BIC	r9, r9, #(~0) << (16+USGE_FRACBITS-3) @ Pos -= (int)Pos
-	ADD	r9, r9, r9, lsl #0x10                 @ Pos += Rate*M
+	ADDS	r9, r9, r9, lsl #(32-USGE_FRACBITS+3) @ Pos += Rate*8?
+	ADC	sl, sl, #0x00                         @ SrcData = (DataPtr += (int)(Rate*8) + Carry) (#IMM is self-modifying)
 	STMIA	fp, {r9,sl}                           @ Store updated {DataPtr,Rate|Pos}
 1:	MixLoop_BlockMix r0, ip,  ,  , \VoiceIdx, r4, lr    @ Mix samples to output
 	MixLoop_BlockMix r1, ip,  , !, \VoiceIdx, r5, lr

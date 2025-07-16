@@ -99,8 +99,8 @@ uSGE_Driver_Mixer:
 @ LDRSB Samp7, [sl, #Delta*3]
 .LMixer_PatchVoiceOffsets:
 	LDR	r0, [r8, #-USGE_VOXTABLE_ENTRY_SIZE]!  @ Rate | Phase<<16 -> r0
-	MOV	r1, r0, lsr #0x10                      @ Phase -> r1
-	BIC	r0, r0, r1, lsl #0x10                  @ Rate -> r0
+	MOV	r1, r0, lsr #(32-USGE_FRACBITS)        @ Phase -> r1
+	BIC	r0, r0, r1, lsl #(32-USGE_FRACBITS)    @ Rate -> r0
 #if USGE_STEREOMIX
 	LDR	r2, [r8, #0x10]                        @ SampRem -> r2
 #else
@@ -109,6 +109,8 @@ uSGE_Driver_Mixer:
 	MLA	lr, r0, r6, r1                         @ nSampToRead = Rate*N + Phase -> lr
 	CMP	r2, lr, lsr #USGE_FRACBITS             @ SampRem < nSampToRead?
 	BLLT	.LMixer_ClipLoopCount
+	MOV	r2, r0, lsr #(USGE_FRACBITS-3)         @ Update ADC immediate for Rate step
+	STRB	r2, [r9, #OFFSET_OF_ADC_FROM_START-OFFSET_OF_LDRSB_FROM_START]
 	MOV	r1, r1, lsl #(32-USGE_FRACBITS)        @ Shift Phase to uppermost bits -> r1
 	MOV	r2, #0xD0                              @ Low byte of `LDRSB Rd, [Rm, #IMM]!` opcode, at offset 0
 1:	ADDS	ip, r1, r0, lsl #(32-USGE_FRACBITS)    @ Phase += Rate?
@@ -144,9 +146,8 @@ uSGE_Driver_Mixer:
 	AND	ip, r7, #0xFF                          @ nVoxRem = nActiveVox -> ip
 	MOV	r8, sl
 0:	LDR	r0, [r8, #-USGE_VOXTABLE_ENTRY_SIZE]!  @ Rate | Phase<<16 -> r0
-	MOV	r1, r0, lsr #0x10                      @ Phase -> r1
-	BIC	r0, r0, r1, lsl #0x10                  @ Rate -> r0
-	BIC	r1, r1, #((~0)<<(USGE_FRACBITS-3))&0xFFFF
+	MOV	r1, r0, lsr #(32-USGE_FRACBITS)        @ Phase -> r1
+	BIC	r0, r0, r1, lsl #(32-USGE_FRACBITS)    @ Rate -> r0
 #if USGE_STEREOMIX
 	LDR	r2, [r8, #0x10]                        @ SampRem -> r2
 #else
@@ -254,9 +255,8 @@ uSGE_Driver_VoxTable:
 	SUB	r3, r3, ip, lsl #0x08                  @ nVoxRem = nActiveVox
 	MOV	sl, r8
 1:	LDR	r0, [r8, #-USGE_VOXTABLE_ENTRY_SIZE]!  @ Rate | Phase<<16 -> r0
-	MOV	r1, r0, lsr #0x10                      @ Phase -> r1
-	BIC	r0, r0, r1, lsl #0x10                  @ Rate -> r0
-	BIC	r1, r1, #((~0)<<(USGE_FRACBITS-3))&0xFFFF
+	MOV	r1, r0, lsr #(32-USGE_FRACBITS)        @ Phase -> r1
+	BIC	r0, r0, r1, lsl #(32-USGE_FRACBITS)    @ Rate -> r0
 #if USGE_STEREOMIX
 	LDR	r2, [r8, #0x10]                        @ SampRem -> r2
 #else

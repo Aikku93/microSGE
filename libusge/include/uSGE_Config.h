@@ -42,10 +42,9 @@
 #define USGE_MAX_VOICES 32
 
 //! Fractional position accuracy
-//! This is limited by our maximum Rate of 4.0, which requires 3
-//! bits to store exactly, and Phase is 16 bits, giving us a
-//! maximum accuracy of 13 bits.
-#define USGE_FRACBITS 13
+//! This is limited by our maximum Rate of 4.0-eps, which requires
+//! the topmost two bits for the integer part.
+#define USGE_FRACBITS 14
 
 //! Threshold below which EG is considered to have stopped
 //! Note that this is NOT used on manual envelopes!
@@ -77,8 +76,8 @@
 #  error "USGE_MAX_VOICES must be >= 1 and <= 45."
 # endif
 #endif
-#if (USGE_FRACBITS < 11 || USGE_FRACBITS > 13)
-# error "USGE_FRACBITS must be >= 11, and <= 13."
+#if (USGE_FRACBITS < 11 || USGE_FRACBITS > 14)
+# error "USGE_FRACBITS must be >= 11, and <= 14."
 #endif
 #if (USGE_EG_LOG2THRES > 16)
 # error "USGE_EG_LOG2THRES must be <= 16."
