@@ -16,7 +16,7 @@
 @ r6:  N
 @ r7:  nActiveVox
 @ r8: &VoxTable[] (points past the last entry)
-@ r9:
+@ r9:  SubdivLevel (with USGE_VOLSUBDIV_RATIO)
 @ sl:
 @ fp:
 @ ip:
@@ -38,8 +38,19 @@ uSGE_Driver_Mixer:
 	MOV	sl, r8
 0:	SUB	r7, r7, r6, lsl #0x18-3                @ nActiveVox | -nTotalLoopsRem<<24 (=N/M)
 #if USGE_VOLSUBDIV
-	ADD	r3, r6, #(1 << (3+USGE_VOLSUBDIV))-1   @ [nLoops = nLoopsPerSubdiv(=Ceiling[N/M/SUBDIV]) -> r3]
+# if USGE_VOLSUBDIV_RATIO
+	SUB	r3, r6, #0x01                          @ [nLoops = nLoopsPerSubdiv(=Ceiling[N/M/SUBDIV]) -> r3]
+	MOV	r3, r3, lsr r9
+	MOV	r3, r3, lsr #0x03
+	ADD	r3, r3, #0x01
+	LDR	ip, .LMixer_SubdivShiftPatchOpcode     @ Patch the instruction that updates the volume
+	LDR	lr, =.LMixer_SubdivShiftPatch
+	SUB	ip, ip, r9, lsl #0x07
+	STR	ip, [lr]
+# else
+	ADD	r3, r6, #(1 << (3+USGE_VOLSUBDIV))-1
 	MOV	r3, r3, lsr #(3+USGE_VOLSUBDIV)
+# endif
 	ORR	r7, r7, r3, lsl #0x08                  @            | nLoopsPerSubdiv<<8
 	ORR	r7, r7, r3, lsl #0x10                  @            | nSubdivLoopsRem<<16
 	MOV	r6, r3, lsl #0x03                      @ N = nLoopsPerSubdiv*M
@@ -186,6 +197,11 @@ uSGE_Driver_Mixer:
 .LMixer_VoxLoopTable:
 	CREATE_VOXLOOPTABLE
 
+.LMixer_SubdivShiftPatchOpcode:
+#if (USGE_VOLSUBDIV && USGE_VOLSUBDIV_RATIO)
+	ADD	r2, r2, lr, lsl #0x08                  @ VolCur += VolStep/SUBDIV
+#endif
+
 ASM_LITPOOL
 
 /************************************************/
@@ -277,6 +293,7 @@ uSGE_Driver_VoxTable:
 	ADD	r0, r8, #0x14
 # endif
 	LDMIA	r0, {r2,lr}                            @ VolCur -> r2, VolStep -> lr
+.LMixer_SubdivShiftPatch:
 	ADD	r2, r2, lr, lsl #0x08-USGE_VOLSUBDIV   @ VolCur += VolStep/SUBDIV
 # if USGE_STEREOMIX
 	STR	r2, [r0], #0x08 - 0x18

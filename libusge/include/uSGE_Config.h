@@ -51,8 +51,18 @@
 //! Voices are cut once EG drops below 2^-USGE_EG_LOG2THRES.
 #define USGE_EG_LOG2THRES 7
 
-//! Log2 subdivision of mix buffer for volume ramping
-#define USGE_VOLSUBDIV 3
+//! Log2 subdivision of mix buffer for volume ramping, and Log2
+//! step per subdivision level (applied iteratively).
+//! The method of operation is by decreasing the high level by
+//! a factor of 1-2^-n until reaching the low level, or the
+//! maximum number of subdivisions is reached. Examples:
+//!  Ratio = 1: Delta = 1-2^-1 = -6.0dB/step
+//!  Ratio = 2: Delta = 1-2^-2 = -2.5dB/step
+//!  Ratio = 3: Delta = 1-2^-3 = -1.2dB/step
+//! If Ratio == 0, then adaptive subdivision is disabled and
+//! subdividing always happens at the finest granularity.
+#define USGE_VOLSUBDIV       3
+#define USGE_VOLSUBDIV_RATIO 2
 
 /************************************************/
 
@@ -84,6 +94,9 @@
 #endif
 #if (USGE_VOLSUBDIV > 4)
 # error "USGE_VOLSUBDIV must be <= 4."
+#endif
+#if (USGE_VOLSUBDIV_RATIO > 3)
+# error "USGE_VOLSUBDIV_RATIO must be <= 3."
 #endif
 
 /************************************************/

@@ -18,7 +18,7 @@ ASM_MODE_THUMB
 1:	MOV	r4, r0                    @ Driver -> r4
 	LDR	r0, [r4, #0x00]           @ State -> r0
 	LDR	r1, =USGE_DRIVER_STATE_READY
-	CMP	r0, r1                    @ Invalid state?
+	SUB	r1, r0                    @ Invalid state?
 	BNE	.LExit
 0:	LDRH	r5, [r4, #0x0A]           @ N = BufLen -> r5
 	PUSH	{r4-r5}                   @ Push {Driver,N}
@@ -27,6 +27,9 @@ ASM_MODE_THUMB
 
 .LVoxUpdateLoop_Enter:
 	LDR	r0, =uSGE_Driver_VoxTable
+#if (USGE_VOLSUBDIV && USGE_VOLSUBDIV_RATIO)
+	MOV	r9, r1                    @ SubdivLevel = 0
+#endif
 	MOV	r8, r0                    @ &VoxTable[] -> r8
 	LDRB	r7, [r4, #0x06]           @ &Vox[] -> r4, nActiveVox=0|-nVoxRem<<7 -> r7
 	NEG	r7, r7
@@ -97,6 +100,7 @@ ASM_FUNC_END(uSGE_Driver_Update)
 @ r6:  Vox.Stat
 @ r7:  nActiveVox | -nVoxRem<<7 (nActiveVox does NOT account for this voice yet)
 @ r8: &VoxTable[]
+@ r9:  SubdivLevel (with USGE_VOLSUBDIV_RATIO)
 @ sp+00h: &Driver
 @ sp+04h:  nVoxRem
 
@@ -115,6 +119,7 @@ uSGE_Driver_VoiceUpdate:
 .LVoxUpdate_KeyOff_Done:
 
 #if USGE_GENERATE_ENVELOPE
+
 .LVoxUpdate_EGUpdate:
 	LDR	r1, =uSGE_RecpLUT         @ &RecpLUT[] -> r1
 	LSL	r0, r6, #(32-5)           @ C=KEYOFF?
@@ -141,18 +146,27 @@ ASM_ALIGN(4)
 	LSR	r0, #0x10
 	B	.LVoxUpdate_EG_Ready
 
-.LVoxUpdate_KeyOn:
-#if !USGE_VOLSUBDIV
-	SUB	r6, #USGE_VOX_STAT_KEYON  @ Only clear KEYON if not ramping. When ramping, we detect this flag
-		                          @ and then avoid ramping from the old value if we have no attack time.
 #endif
+
+.LVoxUpdate_KeyOn:
+	SUB	r6, #USGE_VOX_STAT_KEYON  @ Clear KEYON
 	STRH	r0, [r4, #0x0A]           @ Vox.Offs = 0
 	LDR	r0, [r4, #0x14]           @ Vox.Data = Wav.Data
 	ADD	r0, #0x08
 	STR	r0, [r4, #0x10]
+#if USGE_VOLSUBDIV
+	LDRB	r0, [r4, #0x01]           @ Set OldVol = NewVol (ie. as though EG = 1.0)
+	STRB	r0, [r4, #0x0E]           @ If we have Attack, we will clear this to 0 later
+# if USGE_STEREOMIX
+	LDRB	r0, [r4, #0x02]
+	STRB	r0, [r4, #0x0F]
+# endif
+#endif
 #if USGE_GENERATE_ENVELOPE
+	LSL	r0, r6, #(32-4)           @ Test for MANUAL mode EG
+	BCS	.LVoxUpdate_KeyOn_Done
 0:	LDRB	r0, [r4, #0x03]           @ Vox.Attack?
-	CMP	r0, #0x00                 @  Y: EG = AttackStep
+	LSL	r1, r0, #0x18
 	BNE	.LVoxUpdate_KeyOnWithAttack
 0:	ADD	r6, #0x01                 @ Move to Hold phase
 	LDRB	r0, [r4, #0x04]           @ Vox.Hold?
@@ -167,24 +181,24 @@ ASM_ALIGN(4)
 	LDRB	r0, [r4, #0x06]           @ EG = Vox.Sustain * FFFFhh/FFh
 	LSL	r1, r0, #0x08
 	ADD	r1, r0
-1:	STRH	r1, [r4, #0x0C]           @ Store EG1
+1:	STRH	r1, [r4, #0x0C]           @ Store EG
 #endif
 	B	.LVoxUpdate_KeyOn_Done
+
+#if USGE_GENERATE_ENVELOPE
 
 .LVoxUpdate_KeyOnWithAttack:
-#if USGE_GENERATE_ENVELOPE
-# if USGE_VOLSUBDIV
-	SUB	r6, #USGE_VOX_STAT_KEYON  @ We want to ramp from silence, so disable non-attack handling
-	MOV	r1, #0x00
-	STRH	r1, [r4, #0x0E]           @ OldVolL = OldVolR = 0
-# endif
-	@MOV	r0, r0                    @ EG = AttackStep
-	LDR	r1, =uSGE_RecpLUT
-	BL	uSGE_Driver_GetLinearStep
+#if USGE_VOLSUBDIV
+	STRH	r1, [r4, #0x0C]           @ EG = 0
+	STRH	r1, [r4, #0x0E]           @ VolL = VolR = 0, to ramp from silence
+#else
+	@MOV	r0, r0                    @ EG = AttackStep/2 (trade-off between silence and next level)
+	LDR	r1, =uSGE_RecpLUT         @ This is because otherwise, the first mix chunk is
+	BL	uSGE_Driver_GetLinearStep @ for silence, which is practically useless
+	LSR	r0, #0x01
 	STRH	r0, [r4, #0x0C]
-	B	.LVoxUpdate_KeyOn_Done
-
 #endif
+	B	.LVoxUpdate_KeyOn_Done
 
 .LVoxUpdate_KeyOff:
 	MOV	r0, #USGE_VOX_STAT_EG_MSK @ EGPhase -> r0
@@ -248,10 +262,10 @@ ASM_ALIGN(4)
 #endif
 
 .LVoxUpdate_EG_Ready:
-#if !USGE_VOLSUBDIV
 	STRB	r6, [r4, #0x00]           @ Store updated Vox.Stat
-#endif
+#if !USGE_VOLSUBDIV
 	LDRH	r1, [r4, #0x0C]           @ Load current EG -> r1
+#endif
 #if USGE_GENERATE_ENVELOPE
 	STRH	r0, [r4, #0x0C]           @ Store next EG
 #endif
@@ -263,25 +277,31 @@ ASM_ALIGN(4)
 	SUB	r2, #USGE_VOX_STAT_EG_HLD
 	BNE	1f
 	MVN	r2, r2                    @   Y: Override to EG = 1.0
+# if USGE_VOLSUBDIV
+	LSR	r0, r2, #0x10
+# else
 	LSR	r1, r2, #0x10
+# endif
 1:
 #endif
 
 .LVoxUpdate_StoreToVoxTable:
 	LDRB	r2, [r4, #0x01]           @ VolL * EG -> r2
-	MUL	r2, r1
 #if USGE_STEREOMIX
 	LDRB	r3, [r4, #0x02]           @ VolR * EG -> r3
-	MUL	r3, r1
 #endif
 #if USGE_VOLSUBDIV
-	MOV	r1, #0xFF &~ USGE_VOX_STAT_KEYON
-	AND	r1, r6                    @ Store updated Vox.Stat &~ KEYON
-	STRB	r1, [r4, #0x00]
-	EOR	r1, r6                    @ Vox.Stat & KEYON -> r1
+	MUL	r2, r0
+# if USGE_STEREOMIX
+	MUL	r3, r0
+# endif
 	LSR	r6, r2, #0x10             @ NewVolL -> r6
 	LDRB	r2, [r4, #0x0E]           @ OldVolL -> r2
 	STRB	r6, [r4, #0x0E]           @ Store VolL
+# if USGE_VOLSUBDIV_RATIO
+	MOV	r0, r6                    @ LoVol = NewVolL -> r0
+	MOV	r1, r2                    @ HiVol = OldVolL -> r1
+# endif
 # if USGE_STEREOMIX
 	LSR	r7, r3, #0x10             @ NewVolR -> r7
 	LDRB	r3, [r4, #0x0F]           @ OldVolR -> r3
@@ -291,36 +311,63 @@ ASM_ALIGN(4)
 	LSL	r6, r3, #0x10
 	ORR	r6, r2                    @ Pack OldVolL|OldVolR -> r6
 	SUB	r7, r6                    @ VolStep = NewVol - OldVol -> r7
-	LSL	r6, #0x08                 @ VolCur -> r6
-	MOV	r0, #0x18
+	LSL	r6, #0x08                 @ VolCur = OldVol -> r6
+	MOV	r5, #0x18
 # else
 	SUB	r7, r6, r2                @ VolStep = NewVol - OldVol -> r7
-	LSL	r6, r2, #0x08             @ VolCur -> r6
-	MOV	r0, #0x14
+	LSL	r6, r2, #0x08             @ VolCur = OldVol -> r6
+	MOV	r5, #0x14
 # endif
-	CMP	r1, #0x00                 @ Vox.Stat & KEYON?
-	BEQ	0f
-	LSL	r7, #0x08                 @  Y: VolCur  = VolNew (via VolCur += VolStep)
-	ADD	r6, r7
-	MOV	r7, #0x00                 @     VolStep = 0
-# if USGE_STEREOMIX
-	LSL	r2, r6, #0x10             @     Vol = VolCur
-	LSR	r2, #0x18
-	LSR	r3, r6, #0x18
-# else
-	LSR	r2, r6, #0x08
+	ADD	r5, r8
+	STMIA	r5!, {r6,r7}              @ Store {VolCur,VolStep}
+# if USGE_VOLSUBDIV_RATIO
+#  if USGE_STEREOMIX
+	ASR	r5, r7, #0x10             @ ABS(VolStepR) -> r5
+	BPL	0f                        @ * This will be off by 1 if VolStepL < 0
+	NEG	r5, r5
+0:	SUB	r7, r1, r0                @ ABS(VolStepL) -> r7, and ensure LoVol is in r0, HiVol in r1
+	BHI	0f
+	ADD	r0, r7
+	SUB	r1, r7
+	NEG	r7, r7
+0:	CMP	r5, r7                    @ ABS(VolStepR) > ABS(VolStepL)?
+	BLS	1f
+	LSR	r0, r6, #0x18             @  Y: LoVol = NewVolR
+	LDRB	r1, [r4, #0x0F]           @     HiVol = OldVolR
+#  endif
+	SUB	r7, r0, r1                @ Ensure LoVol is in r0, HiVol in r1
+	BCC	1f                        @ * This check is also needed when selecting the R volume
+	SUB	r0, r7
+	ADD	r1, r7
+1:	MOV	r6, #0x00                 @ ThisSubdivLevel = 0 -> r6
+	ADD	r0, #0x03                 @ <- Adding a bias here helps avoid excessive subdivision for
+	ADD	r1, #0x03                 @    very low volumes, where the stepping is inaudible anyway
+10:	ADD	r7, r1, #(1<<USGE_VOLSUBDIV_RATIO)-1
+	LSR	r7, r1, #USGE_VOLSUBDIV_RATIO
+	SUB	r1, r7                    @ HiVol *= 1-2^-RATIO
+	CMP	r1, r0                    @ HiVol > LoVol?
+	BLS	2f
+	ADD	r6, #0x01                 @  Y: ThisSubdivLevel++
+#  if (USGE_VOLSUBDIV > 1)
+	CMP	r6, #USGE_VOLSUBDIV       @     Can subdivide further?
+	BCC	10b
+#  endif
+2:	CMP	r6, r9                    @ SubdivLevel = MAX(SubdivLevel, ThisSubdivLevel)
+	BCC	0f
+	MOV	r9, r6
+0:
 # endif
-0:	ADD	r0, r8
-	STMIA	r0!, {r6,r7}              @ Store {VolCur,VolStep}
 #else
+	MUL	r2, r1
 	LSR	r2, #0x10                 @ Shift out EG bits
 	STRB	r2, [r4, #0x0E]           @ Store VolL
 # if USGE_STEREOMIX
+	MUL	r3, r1
 	LSR	r3, #0x10
 	STRB	r3, [r4, #0x0F]           @ Store VolR
 # endif
 #endif
-	LDR	r0, [r4, #0x08]           @ Rate | Offs<<16 -> r0
+1:	LDR	r0, [r4, #0x08]           @ Rate | Offs<<16 -> r0
 	LSL	r1, r0, #0x10
 	LSR	r1, #0x10+USGE_FRACBITS+2
 	BNE	.LVoxUpdate_ClipRate
