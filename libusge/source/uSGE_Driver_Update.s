@@ -332,8 +332,10 @@ ASM_ALIGN(4)
 	NEG	r7, r7
 0:	CMP	r5, r7                    @ ABS(VolStepR) > ABS(VolStepL)?
 	BLS	1f
-	LSR	r0, r6, #0x18             @  Y: LoVol = NewVolR
-	LDRB	r1, [r4, #0x0F]           @     HiVol = OldVolR
+	LSL	r0, r7, #0x18             @  Y: LoVol = NewVolR
+	ADD	r0, r6
+	LSR	r0, #0x18
+	LSR	r1, r6, #0x18             @     HiVol = OldVolR
 #  endif
 	SUB	r7, r0, r1                @ Ensure LoVol is in r0, HiVol in r1
 	BCC	1f                        @ * This check is also needed when selecting the R volume
