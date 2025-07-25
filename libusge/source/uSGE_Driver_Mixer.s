@@ -4,10 +4,9 @@
 #include "uSGE_Driver_MixerMacros.inc"
 /************************************************/
 
-//! Generate warning for large voice tables
-#ifdef USGE_LARGE_VOXTABLE
-# warning "USGE_MAX_VOICES exceeds fast mixer limits; performance will be degraded."
-#endif
+//! Once a one-shot sample has ended, we loop into silence.
+//! This defines the size of this silence (excluding padding!).
+#define SILENT_LOOP_SIZE 64
 
 /************************************************/
 
@@ -184,14 +183,13 @@ uSGE_Driver_Mixer:
 	BX	fp
 
 .LMixer_PatchOpcodes:
-#if USGE_STEREOMIX
 	MUL	r0, r9, ip                             @ Mix first voice (left)
+#if USGE_STEREOMIX
 	MUL	r4, r9, lr                             @ Mix first voice (right)
+#endif
 	MLANE	r0, r9, ip, r0                         @ Mix other voice (left)
+#if USGE_STEREOMIX
 	MLANE	r4, r9, lr, r4                         @ Mix other voice (right)
-#else
-	MUL	r0, ip, r9                             @ Mix first voice
-	MLANE	r0, ip, r9, r0                         @ Mix other voice
 #endif
 
 .LMixer_VoxLoopTable:
@@ -357,8 +355,10 @@ ASM_LITPOOL
 #else
 	LDR	lr, [r8, #0x10]
 #endif
-0:	SUB	ip, ip, lr                             @ DataPtr -= LoopSize
-	ADDS	r2, r2, lr                             @ SampRem += LoopSize?
+	CMP	lr, #0x00                              @ Have a loop?
+	BEQ	2f
+0:	SUB	ip, ip, lr                             @  Y: DataPtr -= LoopSize
+	ADDS	r2, r2, lr                             @     SampRem += LoopSize?
 	BLE	0b
 1:	STR	ip, [r8, #0x04]
 #if USGE_STEREOMIX
@@ -367,6 +367,11 @@ ASM_LITPOOL
 	STR	r2, [r8, #0x0C]
 #endif
 	B	.LMixer_LoopSample_Return
+2:	LDR	ip, =uSGE_Driver_SilentLoop            @  N: Loop silence
+	MOV	r2, #SILENT_LOOP_SIZE
+	B	1b
+
+ASM_LITPOOL
 
 /************************************************/
 #if USGE_CLIPMIXDOWN
@@ -414,6 +419,15 @@ ASM_DATA_END(uSGE_Driver_VoxTable)
 
 /************************************************/
 #endif
+/************************************************/
+
+ASM_DATA_BEG(uSGE_Driver_SilentLoop, ASM_DATASECT_RODATA;ASM_ALIGN(1))
+
+uSGE_Driver_SilentLoop:
+	.fill (SILENT_LOOP_SIZE + 32) @ Need 8*MAX_RATE samples of padding
+
+ASM_DATA_END(uSGE_Driver_SilentLoop)
+
 /************************************************/
 //! EOF
 /************************************************/

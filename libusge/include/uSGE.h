@@ -2,9 +2,6 @@
 #pragma once
 /************************************************/
 
-//! uSGE_Wav_t::Loop
-#define USGE_WAV_MIN_LOOP 64 //! 8 loop iterations
-
 //! uSGE_Vox_t::Stat
 #define USGE_VOX_STAT_EG_ATK    0x00
 #define USGE_VOX_STAT_EG_HLD    0x01
@@ -47,10 +44,6 @@ extern "C" {
 //!  -Waveform data must be extended by 8*MAX_RATE samples past
 //!   the end of the array. This is for optimization in the mixer.
 //!   MAX_RATE is currently 4.0.
-//!  -One-shot samples must end with MIN_LOOP samples of silence,
-//!   which must be included as part of the Size member. This
-//!   allows the mixer to loop the silent section while mixing
-//!   to avoid having to add special-case code.
 struct USGE_ALIGNED USGE_PACKED uSGE_Wav_t {
 	uint32_t Size;    //! [00h] Waveform length (in samples)
 	uint32_t Loop;    //! [04h] Loop size (in samples; 0 = No loop)

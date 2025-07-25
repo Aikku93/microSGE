@@ -103,11 +103,9 @@ struct StereoMixerEntry_t {
 	LDRSB	r9, [sl, #0x00]\WrBack1               @ Load sample 0     (offset is self-modifying)
 	LDRSB	fp, [sl, #0x00]\WrBack2               @ Load sample 2 (!) (offset is self-modifying)
 	ADDS	r9, r9, fp, lsl #0x10                 @ Combine Smp0|Smp2
-#if USGE_STEREOMIX
 	MLANE	\RdL, r9, \RvL, \RdL                  @ Mix Smp0|Smp2     (instruction becomes MULNE on first voice)
+#if USGE_STEREOMIX
 	MLANE	\RdR, r9, \RvR, \RdR
-#else
-	MLANE	\RdL, \RvL, r9, \RdL
 #endif
 .endm
 
