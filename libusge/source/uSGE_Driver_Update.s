@@ -370,9 +370,11 @@ ASM_ALIGN(4)
 # endif
 #endif
 1:	LDR	r0, [r4, #0x08]           @ Rate | Offs<<16 -> r0
+#if (USGE_FRACBITS < 14)
 	LSL	r1, r0, #0x10
 	LSR	r1, #0x10+USGE_FRACBITS+2
 	BNE	.LVoxUpdate_ClipRate
+#endif
 .LVoxUpdate_ClipRate_Return:
 	LDR	r1, [r4, #0x10]           @ DataPtr -> r1
 	LDR	r7, [r4, #0x14]           @ Vox.Wav -> r7
@@ -380,9 +382,6 @@ ASM_ALIGN(4)
 	ADD	r5, r7                    @ End = Wav.Data + Wav.Size -> r5
 	SUB	r5, r1                    @ SampRem = End - DataPtr -> r5
 	MOV	ip, r6                    @ Save Wav.Loop -> ip (we need it later)
-	CMP	r6, #0x00                 @ One-shot samples are looped while mixing
-	BNE	0f
-	MOV	r6, #USGE_WAV_MIN_LOOP
 0:	MOV	lr, r1                    @ Save original DataPtr -> lr
 	LSL	r7, r0, #0x10             @ Rewind DataPtr by (int)(Rate*8) (mixer pre-increments)
 	LSR	r7, #(16+USGE_FRACBITS)
@@ -448,18 +447,14 @@ ASM_ALIGN(4)
 	B	.LVoxUpdateLoop_Tail
 
 .LVoxUpdate_ClipRate:
+#if (USGE_FRACBITS < 14)
 	LSR	r0, #0x10                 @ Rate = MAX_RATE
-#if (USGE_FRACBITS == 14)
-	ADD	r0, #0x01
-	LSL	r0, #0x10
-	SUB	r0, #0x01
-#else
 	LSL	r0, #0x10
 	MOV	r1, #0x04
 	LSL	r1, #USGE_FRACBITS
 	ORR	r0, r1
-#endif
 	B	.LVoxUpdate_ClipRate_Return
+#endif
 
 .LVoxUpdate_SampleEnds:
 	LDRB	r7, [r4, #0x00]           @ Vox.Stat -> r7
