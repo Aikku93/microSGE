@@ -332,7 +332,9 @@ ASM_ALIGN(4)
 	NEG	r7, r7
 0:	CMP	r5, r7                    @ ABS(VolStepR) > ABS(VolStepL)?
 	BLS	1f
-	LSL	r0, r7, #0x18             @  Y: LoVol = NewVolR
+	MOV	r0, r8
+	LDR	r0, [r0, #0x1C]
+	LSL	r0, #0x08                 @  Y: LoVol = NewVolR
 	ADD	r0, r6
 	LSR	r0, #0x18
 	LSR	r1, r6, #0x18             @     HiVol = OldVolR
@@ -344,8 +346,15 @@ ASM_ALIGN(4)
 1:	MOV	r6, #0x00                 @ ThisSubdivLevel = 0 -> r6
 	ADD	r0, #0x03                 @ <- Adding a bias here helps avoid excessive subdivision for
 	ADD	r1, #0x03                 @    very low volumes, where the stepping is inaudible anyway
-10:	ADD	r7, r1, #(1<<USGE_VOLSUBDIV_RATIO)-1
+10:
+#if (USGE_VOLSUBDIV_RATIO <= 3)
+	ADD	r7, r1, #(1<<USGE_VOLSUBDIV_RATIO)-1
 	LSR	r7, r1, #USGE_VOLSUBDIV_RATIO
+#else
+	SUB	r7, r1, #0x01
+	LSR	r7, #USGE_VOLSUBDIV_RATIO
+	ADD	r7, #0x01
+#endif
 	SUB	r1, r7                    @ HiVol *= 1-2^-RATIO
 	CMP	r1, r0                    @ HiVol > LoVol?
 	BLS	2f

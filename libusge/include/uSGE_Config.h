@@ -62,7 +62,7 @@
 //! If Ratio == 0, then adaptive subdivision is disabled and
 //! subdividing always happens at the finest granularity.
 #define USGE_VOLSUBDIV       3
-#define USGE_VOLSUBDIV_RATIO 2
+#define USGE_VOLSUBDIV_RATIO 3
 
 /************************************************/
 
@@ -95,8 +95,8 @@
 #if (USGE_VOLSUBDIV > 4)
 # error "USGE_VOLSUBDIV must be <= 4."
 #endif
-#if (USGE_VOLSUBDIV_RATIO > 3)
-# error "USGE_VOLSUBDIV_RATIO must be <= 3."
+#if (USGE_VOLSUBDIV_RATIO > 6)
+# error "USGE_VOLSUBDIV_RATIO must be <= 6."
 #endif
 
 /************************************************/
