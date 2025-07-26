@@ -123,7 +123,7 @@ uSGE_Driver_Mixer:
 	STRB	r2, [r9, #OFFSET_OF_ADC_FROM_START-OFFSET_OF_LDRSB_FROM_START]
 	MOV	r1, r1, lsl #(32-USGE_FRACBITS)        @ Shift Phase to uppermost bits -> r1
 	MOV	r2, #0xD0                              @ Low byte of `LDRSB Rd, [Rm, #IMM]!` opcode, at offset 0
-1:	ADDS	ip, r1, r0, lsl #(32-USGE_FRACBITS)    @ Phase += Rate?
+1:	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)    @ Phase += Rate?
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS         @ CurOffs += (int)Rate + C
 	STRB	ip, [r9, #1*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
@@ -135,7 +135,7 @@ uSGE_Driver_Mixer:
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS
 	STRB	ip, [r9, #2*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
-	ADDS	ip, r1, r0, lsl #(32-USGE_FRACBITS)
+	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS
 	STRB	ip, [r9, #3*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
