@@ -10,6 +10,198 @@
 
 /************************************************/
 
+@ r0 must be reserved!
+@ This function is called from uSGE_Driver_Open(),
+@ which has the driver pointer in r0.
+
+ASM_FUNC_GLOBAL(uSGE_Driver_LoadMixer)
+ASM_FUNC_BEG   (uSGE_Driver_LoadMixer, ASM_FUNCSECT_TEXT;ASM_MODE_THUMB)
+
+uSGE_Driver_LoadMixer:
+	PUSH	{r4-r7}
+	MOV	r1, #MAX_VOICES_PER_CHUNK
+	LDR	r2, =.LMixerArea_VoxArea + OFFSET_OF_ADR_FROM_START
+	LDR	r3, =.LLoadMixerOpcodes_MixVoice
+	MOV	r6, #.LMixerArea_VoxArea + OFFSET_OF_ADR_FROM_START - (uSGE_Driver_VoxTable + (MAX_VOICES_PER_CHUNK-1)*USGE_VOXTABLE_ENTRY_SIZE) + 0x08
+	LDR	r7, .LLoadMixer_ADR_Opcode
+
+.LLoadMixer_LoadVoiceMixers:
+1:	MOV	r4, r6                                 @ Rotate offset as needed
+	MOV	r5, #0x10
+	CMP	r4, #0xFF
+	BLS	11f
+10:	LSR	r4, #0x02
+	SUB	r5, #0x01
+	CMP	r4, #0xFF
+	BHI	10b
+11:	LSL	r5, #0x1C                              @ Mask and shift rotate amount
+	LSR	r5, #0x1C - 8
+	ADD	r4, r5                                 @ Store ADR instruction
+	ADD	r4, r7
+	STMIA	r2!, {r4}
+	MOV	r4, #STRIDE_BETWEEN_VOICES - 0x04      @ Copy remaining instructions
+12:	SUB	r4, #0x04
+	LDR	r5, [r3, r4]
+	STR	r5, [r2, r4]
+	BHI	12b
+2:	ADD	r6, #STRIDE_BETWEEN_VOICES + USGE_VOXTABLE_ENTRY_SIZE
+	ADD	r2, #STRIDE_BETWEEN_VOICES - 0x04
+	SUB	r1, #0x01                              @ More voices?
+	BNE	1b
+
+.LLoadMixer_LoadMergeStore:
+	ADD	r3, #STRIDE_BETWEEN_VOICES - 0x04      @ Load block merge/store sequence
+	MOV	r4, #.LLoadMixerOpcodes_MergeStoreLoop_End - .LLoadMixerOpcodes_MergeStoreLoop
+0:	SUB	r4, #0x04
+	LDR	r5, [r3, r4]
+	STR	r5, [r2, r4]
+	BHI	0b
+#if USGE_CLIPMIXDOWN
+1:	MOV	r3, r2                                 @ Patch the 'jump to clipper' opcodes
+	ADD	r3, #0x04 + OFFSET_OF_BNE_FROM_BLOCK_MERGE
+# if USGE_STEREOMIX
+	MOV	r1, #0x04
+# else
+	MOV	r1, #0x02
+# endif
+10:	LDR	r4, [r3]
+	SUB	r4, r3
+	ASR	r4, #0x02
+	MOV	r5, #0x1A+1
+	LSL	r5, #0x18
+	ADD	r4, r5
+	STR	r4, [r3]
+	ADD	r3, #STRIDE_BETWEEN_BLOCK_MERGE
+	SUB	r1, #0x01
+	BNE	10b
+#endif
+2:	ADD	r2, #.LLoadMixerOpcodes_MergeStoreLoop_RetryPatch - .LLoadMixerOpcodes_MergeStoreLoop
+#if USE_BUFFERED_MIXER
+# if USGE_STEREOMIX
+	MOV	r1, #0x0C
+# else
+	MOV	r1, #0x04
+# endif
+#endif
+20:
+#if USE_BUFFERED_MIXER
+	LDR	r4, [r2, r1]                           @ Patch the 'jump to retry' opcodes
+#else
+	LDR	r4, [r2]
+#endif
+	SUB	r4, r2
+#if USE_BUFFERED_MIXER
+	SUB	r4, r1
+#endif
+	ASR	r4, #0x02
+	MOV	r5, #0xEA+1
+	LSL	r5, #0x18
+	ADD	r4, r5
+#if USE_BUFFERED_MIXER
+	STR	r4, [r2, r1]
+# if USGE_STEREOMIX
+	SUB	r1, #0x0C
+# else
+	SUB	r1, #0x04
+# endif
+	BCS	20b
+#else
+	STR	r4, [r2]
+#endif
+
+.LLoadMixer_Exit:
+	POP	{r4-r7}
+	BX	lr
+
+ASM_MODE_ARM
+.LLoadMixer_ADR_Opcode:
+	SUB	fp, pc, #0x00
+
+/************************************************/
+ASM_MODE_ARM
+/************************************************/
+
+.LLoadMixerOpcodes_MixVoice:
+	MixLoop_BlockMixVoice
+
+.LLoadMixerOpcodes_MergeStoreLoop:
+#if USGE_CLIPMIXDOWN
+	LDR	r9, .LLoadMixerOpcodes_ClipConstant
+#endif
+	MixLoop_BlockMerge r0, r0, r1                  @ Merge all samples -> r0,r1,r2,r3
+.LLoadMixerOpcodes_ClipReturn_r0:
+	MixLoop_BlockMerge r1, r2, r3
+.LLoadMixerOpcodes_ClipReturn_r1:
+#if USGE_STEREOMIX
+	MixLoop_BlockMerge r2, r4, r5
+.LLoadMixerOpcodes_ClipReturn_r2:
+	MixLoop_BlockMerge r3, r6, r7
+.LLoadMixerOpcodes_ClipReturn_r3:
+#endif
+.LLoadMixerOpcodes_MergeSamples:
+#if USGE_STEREOMIX
+	LDMFD	sp!, {sl,fp}                           @ BufL -> sl, BufR -> fp
+	STMIA	sl!, {r0,r1}                           @ Store Sample0..7 (left)
+	STMIA	fp!, {r2,r3}                           @ Store Sample0..7 (right)
+	STMFD	sp!, {sl,fp}                           @ Store updated {BufL,BufR}
+#else
+	STMIA	r4!, {r0-r1}                           @ Store Sample0..7
+#endif
+	ADDS	r8, r8, #0x01<<25                      @ --nLoopsRem?
+.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch:           @ <- Self modifying jump to first voice to mix
+	BCC	.
+.LLoadMixerOpcodes_MergeStoreLoop_RetryPatch:          @ <- Needs to be patched relative to the mixer area
+	.word	.LMixer_Retry - 0x08
+#if USE_BUFFERED_MIXER
+# if USGE_STEREOMIX
+	NOP	                                       @ <- These 2/3 instructions are here for when we need to
+	NOP	                                       @    LDR/LDMIA/STR from the mixing buffer on the last batch
+# endif
+	.word	.LMixer_Retry - 0x08
+#endif
+.LLoadMixerOpcodes_ClipConstant:
+#if USGE_CLIPMIXDOWN
+	.word	0x01010101
+#endif
+.LLoadMixerOpcodes_MergeStoreLoop_End:
+
+.LLoadMixerOpcodes_StoreBufferedSamples:
+#if USE_BUFFERED_MIXER
+	ADDS	r8, r8, #0x01<<25                      @ --nLoopsRem?
+# if USGE_STEREOMIX
+	LDR	ip, [sp, #0x18]                        @ Store updated samples back to buffer
+	STMIA	ip!, {r0-r7}
+	STR	ip, [sp, #0x18]
+# else
+	STMIA	r5!, {r0-r3}
+# endif
+.LLoadMixerOpcodes_StoreBufferedSamples_JumpPatch:     @ <- Self modifying jump to first voice to mix
+# if USGE_STEREOMIX
+	LDMCCIA	ip, {r0-r7}                            @    * We might need a LDMIA before the jump, though!
+# else
+	LDMCCIA	r5, {r0-r3}
+# endif
+	BCC	.
+.LLoadMixerOpcodes_StoreBufferedSamples_RetryPatch:    @ <- Needs to be patched relative to the mixer area
+	.word	.LMixer_Retry - 0x08
+#endif
+.LLoadMixerOpcodes_StoreBufferedSamples_End:
+
+.LLoadMixerOpcodes_MergeStoreWithBuffer:
+#if USE_BUFFERED_MIXER
+# if USGE_STEREOMIX
+	LDRCC	ip, [sp, #0x18]
+	LDMCCIA	ip!, {r0-r7}
+	STRCC	ip, [sp, #0x18]
+# else
+	LDMCCIA	r5!, {r0-r3}
+# endif
+#endif
+
+ASM_FUNC_END(uSGE_Driver_LoadMixer)
+
+/************************************************/
+
 @ r4: &DstBufferL[]
 @ r5: &DstBufferR[] (with USGE_STEREOMIX)
 @ r6:  N
@@ -20,6 +212,10 @@
 @ fp:
 @ ip:
 @ lr:
+@ With USE_BUFFERED_MIXER:
+@  r5:     &MixBuffer[] (without USGE_STEREOMIX)
+@  sp+00h:  HaveBufferedChunk | VoxOffs<<1 | -nTotalVoxRem<<16
+@  sp+04h: &MixBuffer[] (with USGE_STEREOMIX)
 
 ASM_FUNC_GLOBAL(uSGE_Driver_Mixer)
 ASM_FUNC_BEG   (uSGE_Driver_Mixer, ASM_FUNCSECT_IWRAM;ASM_MODE_ARM)
@@ -28,13 +224,6 @@ uSGE_Driver_Mixer:
 	ADR	ip, .LMixer_VoxLoopTable - 0x08*1
 	ADD	ip, ip, r7, lsl #0x03
 	LDMIA	ip, {sl,fp}                            @ `B .LMixLoop_BlockMixVoiceX` -> sl, &BlockLoopPtr -> fp
-#if ((USGE_STEREOMIX && USGE_MAX_VOICES > 25) || (!USGE_STEREOMIX && USGE_MAX_VOICES > 30))
-	LDR	r3, =.LMixLoop_LoopOpcode
-	STR	sl, [r3]
-#else
-	STR	sl, .LMixLoop_LoopOpcode
-#endif
-	MOV	sl, r8
 0:	SUB	r7, r7, r6, lsl #0x18-3                @ nActiveVox | -nTotalLoopsRem<<24 (=N/M)
 #if USGE_VOLSUBDIV
 # if USGE_VOLSUBDIV_RATIO
@@ -43,7 +232,7 @@ uSGE_Driver_Mixer:
 	MOV	r3, r3, lsr #0x03
 	ADD	r3, r3, #0x01
 	LDR	ip, .LMixer_SubdivShiftPatchOpcode     @ Patch the instruction that updates the volume
-	LDR	lr, =.LMixer_SubdivShiftPatch
+	ADR	lr, .LMixer_SubdivShiftPatch
 	SUB	ip, ip, r9, lsl #0x07
 	STR	ip, [lr]
 # else
@@ -59,7 +248,84 @@ uSGE_Driver_Mixer:
 	SUB	r3, r3, r7, lsl #0x18                  @ nLoops | -nVoxRem<<24 -> r3
 	ADD	r9, fp, #OFFSET_OF_LDRSB_FROM_START
 
-.LMixer_PatchFirstVoiceMUL:
+.LMixer_PatchTargetBuffer:
+#if USE_BUFFERED_MIXER
+	LDR	ip, [sp, #0x00]                        @ Mixing the first batch?
+	CMN	ip, #MAX_VOICES_PER_CHUNK<<16
+	TST	ip, #0x01
+# if USGE_STEREOMIX
+	LDREQ	r0, .LMixer_InvocationPatchOpcode      @  Y: Skip loading from buffer
+	STREQ	r0, .LMixer_InvocationPatch
+	ADRNE	r0, .LMixer_InvocationPatchLoadOpcodes @  N: Load from buffer before invoking mixer
+	ADRNE	r1, .LMixer_InvocationPatch
+	LDMNEIA	r0, {r0,r2,lr}
+	BICCC	r2, r2, #0x01<<21                      @     Skip writeback when we will store back to the buffer
+	STMNEIA	r1, {r0,r2,lr}
+# else
+	LDREQ	r0, .LMixer_InvocationPatchOpcode      @  Y: Skip loading from buffer
+	LDRNE	r1, .LMixer_InvocationPatchLoadOpcodes @  N: Load from buffer before invoking mixer
+	BICCC	r1, r1, #0x01<<21
+	STREQ	r0, .LMixer_InvocationPatch
+	STRNE	r1, .LMixer_InvocationPatch
+# endif
+	LDRCS	r0, =.LLoadMixerOpcodes_MergeStoreLoop @ Select overlay
+	LDRCC	r0, =.LLoadMixerOpcodes_StoreBufferedSamples
+#endif
+
+.LMixer_LoadOverlay:
+	LDR	r2, =.LMixerArea_StoreArea
+#if USE_BUFFERED_MIXER
+1:	LDR	r1, =.LLoadMixerOpcodes_StoreBufferedSamples_End - .LLoadMixerOpcodes_StoreBufferedSamples
+10:	SUBS	r1, r1, #0x04
+	LDR	lr, [r0, r1]                           @ * Note that we only copy the smaller of the two overlay
+	STR	lr, [r2, r1]                           @   sizes, since we only ever switch between the two of them.
+	BHI	10b
+2:	CMN	ip, #MAX_VOICES_PER_CHUNK<<16          @ C = LastChunk, Z = HaveBufferedChunk?
+	TST	ip, #0x01
+	BCS	21f
+20:	LDR	lr, [r2, #.LLoadMixerOpcodes_StoreBufferedSamples_RetryPatch - .LLoadMixerOpcodes_StoreBufferedSamples]!
+	SUB	lr, lr, r2                             @ Patch the 'jump to retry' opcode, and the 'loop over blocks' opcode
+	MOV	lr, lr, asr #0x02
+	ADD	lr, lr, #(0xEA+1)<<24
+	STR	lr, [r2]
+	SUB	sl, sl, #((.LLoadMixerOpcodes_StoreBufferedSamples_JumpPatch - .LLoadMixerOpcodes_StoreBufferedSamples) - \
+		          (.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch       - .LLoadMixerOpcodes_MergeStoreLoop)) / 0x04
+	STREQ	sl, [r2, #.LLoadMixerOpcodes_StoreBufferedSamples_JumpPatch  - .LLoadMixerOpcodes_StoreBufferedSamples_RetryPatch]
+	SUBNE	sl, sl, #0x04/0x04                     @ * When we have a prior buffer, insert a LDMIA before the jump!
+	LDRNE	lr, [r0, #.LLoadMixerOpcodes_StoreBufferedSamples_JumpPatch  - .LLoadMixerOpcodes_StoreBufferedSamples]
+	STRNE	lr, [r2, #.LLoadMixerOpcodes_StoreBufferedSamples_JumpPatch  - .LLoadMixerOpcodes_StoreBufferedSamples_RetryPatch]!
+	STRNE	sl, [r2, #0x04]
+	B	3f
+21:
+# if USGE_STEREOMIX
+	@ When mixing the last chunk, and we had a prior chunk
+	@ in the mix buffer, insert a [LDR/]LDMIA[/STR] sequence
+	@ to load the samples for the next iteration
+	ADDNE	r0, r0, #.LLoadMixerOpcodes_MergeStoreWithBuffer     - .LLoadMixerOpcodes_MergeStoreLoop
+	LDMNEIA	r0, {r0-r1,lr}
+	ADDNE	r2, r2, #.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch - .LLoadMixerOpcodes_MergeStoreLoop
+	STMNEIA	r2!, {r0-r1,lr}
+	SUBNE	sl, sl, #0x0C/0x04
+	ADDEQ	r2, r2, #.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch - .LLoadMixerOpcodes_MergeStoreLoop
+	STR	sl, [r2]
+# else
+	LDRNE	r0, [r0, #.LLoadMixerOpcodes_MergeStoreWithBuffer     - .LLoadMixerOpcodes_MergeStoreLoop]
+	STRNE	r0, [r2, #.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch - .LLoadMixerOpcodes_MergeStoreLoop]
+	SUBNE	sl, sl, #0x04/0x04
+	ADDNE	r2, r2, #0x04
+	STR	sl, [r2, #.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch - .LLoadMixerOpcodes_MergeStoreLoop]
+# endif
+3:
+#else
+	STR	sl, [r2, #.LLoadMixerOpcodes_MergeStoreLoop_JumpPatch - .LLoadMixerOpcodes_MergeStoreLoop]
+#endif
+
+.LMixer_PatchFirstVoiceWithMUL:
+	MOV	sl, r8                                 @ Save &VoxTable[] -> sl
+#if USE_BUFFERED_MIXER
+	TST	ip, #0x01                              @ If we are not mixing the first batch, patch first voice with MLA
+	BNE	.LMixer_PatchVoicesWithMLA
+#endif
 	ADD	ip, r9, #OFFSET_OF_MLANE_FROM_LDRSB
 #if USGE_STEREOMIX
 	ADR	lr, .LMixer_PatchOpcodes + 0x08*0
@@ -79,7 +345,7 @@ uSGE_Driver_Mixer:
 #endif
 1:	B	.LMixer_PatchVoiceOffsets
 
-.LMixer_PatchOtherVoiceMLA:
+.LMixer_PatchVoicesWithMLA:
 	ADD	ip, r9, #OFFSET_OF_MLANE_FROM_LDRSB
 #if USGE_STEREOMIX
 	ADR	lr, .LMixer_PatchOpcodes + 0x08*1
@@ -121,9 +387,9 @@ uSGE_Driver_Mixer:
 	BLLT	.LMixer_ClipLoopCount
 	MOV	r2, r0, lsr #(USGE_FRACBITS-3)         @ Update ADC immediate for Rate step
 	STRB	r2, [r9, #OFFSET_OF_ADC_FROM_START-OFFSET_OF_LDRSB_FROM_START]
-	MOV	r1, r1, lsl #(32-USGE_FRACBITS)        @ Shift Phase to uppermost bits -> r1
+	MOV	r1, #0x00                              @ Start with initial Phase=0 to ensure we never over-step, as this sounds awful
 	MOV	r2, #0xD0                              @ Low byte of `LDRSB Rd, [Rm, #IMM]!` opcode, at offset 0
-1:	ADDS	ip, r1, r0, lsl #(32-USGE_FRACBITS)    @ Phase += Rate?
+1:	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)    @ Phase += Rate?
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS         @ CurOffs += (int)Rate + C
 	STRB	ip, [r9, #1*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
@@ -135,7 +401,7 @@ uSGE_Driver_Mixer:
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS
 	STRB	ip, [r9, #2*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
-	ADDS	ip, r1, r0, lsl #(32-USGE_FRACBITS)
+	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
 	ADC	ip, r2, r0, lsr #USGE_FRACBITS
 	STRB	ip, [r9, #3*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x00]
 	ADDS	r1, r1, r0, lsl #(32-USGE_FRACBITS)
@@ -146,7 +412,7 @@ uSGE_Driver_Mixer:
 	STRB	ip, [r9, #3*STRIDE_BETWEEN_SAMPLE_PAIRS + 0x04]
 2:	ADD	r9, r9, #STRIDE_BETWEEN_VOICES         @ Move to next voice
 	ADDS	r3, r3, #0x01<<24                      @ --nVoxRem?
-	BCC	.LMixer_PatchOtherVoiceMLA
+	BCC	.LMixer_PatchVoicesWithMLA
 
 .LMixer_AdvanceSampsRemAndMix:
 	ADD	r7, r7, r3, lsl #0x18                  @ nTotalLoopsRem -= nLoops
@@ -180,7 +446,17 @@ uSGE_Driver_Mixer:
 #else
 	STMFD	sp!, {sl,fp}
 #endif
-	BX	fp
+
+.LMixer_InvocationPatch:
+#if USE_BUFFERED_MIXER
+	BX	fp                                     @ <- Replaced by LDMIA (or LDR/LDMIA/STR) as needed
+# if USGE_STEREOMIX
+	NOP
+	NOP
+# endif
+#endif
+.LMixer_InvocationPatchOpcode:
+	BX	fp                                     @ <- Used when mixing chunk 2 and onward (never modified)
 
 .LMixer_PatchOpcodes:
 	MUL	r0, r9, ip                             @ Mix first voice (left)
@@ -200,45 +476,18 @@ uSGE_Driver_Mixer:
 	ADD	r2, r2, lr, lsl #0x08                  @ VolCur += VolStep/SUBDIV
 #endif
 
+.LMixer_InvocationPatchLoadOpcodes:
+#if USE_BUFFERED_MIXER
+# if USGE_STEREOMIX
+	LDR	ip, [sp, #0x18]                        @ Load buffered samples
+	LDMIA	ip!, {r0-r7}
+	STR	ip, [sp, #0x18]
+# else
+	LDMIA	r5!, {r0-r3}
+# endif
+#endif
+
 ASM_LITPOOL
-
-/************************************************/
-
-#ifdef SMALL_VOXTABLE
-ASM_DATA_GLOBAL(uSGE_Driver_VoxTable)
-uSGE_Driver_VoxTable:
-	.space USGE_MAX_VOICES * USGE_VOXTABLE_ENTRY_SIZE
-#else
-.LMixLoop_VoiceTablePtrs:
-	CREATE_VOXTABLEPTRS
-#endif
-
-.LMixLoop_BlockLoop:
-	MixLoop_BlockMixVoices
-#if USGE_CLIPMIXDOWN
-	LDR	r9, =0x01010101
-#endif
-	MixLoop_BlockMerge r0, r0, r1                  @ Merge all samples -> r0,r1,r2,r3
-.LMixLoop_BlockLoop_ClipReturn_r0:
-	MixLoop_BlockMerge r1, r2, r3
-.LMixLoop_BlockLoop_ClipReturn_r1:
-#if USGE_STEREOMIX
-	MixLoop_BlockMerge r2, r4, r5
-.LMixLoop_BlockLoop_ClipReturn_r2:
-	MixLoop_BlockMerge r3, r6, r7
-.LMixLoop_BlockLoop_ClipReturn_r3:
-#endif
-#if USGE_STEREOMIX
-	LDMFD	sp!, {sl,fp}                           @ BufL -> sl, BufR -> fp
-	STMIA	sl!, {r0,r1}                           @ Store Sample0..7 (left)
-	STMIA	fp!, {r2,r3}                           @ Store Sample0..7 (right)
-	STMFD	sp!, {sl,fp}                           @ Store updated {BufL,BufR}
-#else
-	STMIA	r4!, {r0-r1}                           @ Store Sample0..7
-#endif
-	ADDS	r8, r8, #0x01<<25                      @ --nLoopsRem?
-.LMixLoop_LoopOpcode:
-	BCC	.LMixLoop_BlockLoop                    @ <- Self modifying
 
 /************************************************/
 
@@ -307,18 +556,29 @@ uSGE_Driver_VoxTable:
 #endif
 2:	ADDS	r3, r3, #0x01<<8                       @ --nVoxRem?
 	BCC	1b
+
+.LMixer_Restart:
 #if USGE_VOLSUBDIV
 	TST	r7, #0xFF<<16                          @ Next subdivision?
 	ANDEQ	lr, r7, #0xFF<<8                       @  Y: nSubdivLoopsRem = nLoopsPerSubdiv
 	ORREQ	r7, r7, lr, lsl #(16-8)
 #endif
-
-.LMixer_Restart:
 	B	.LMixer_AdvanceSampsRemAndMix
 
 ASM_LITPOOL
 
 .LExit:
+#if USE_BUFFERED_MIXER
+# if USGE_STEREOMIX
+	LDR	r0, [sp], #0x08
+# else
+	LDR	r0, [sp], #0x04
+# endif
+	ORR	r0, r0, #0x01                          @ HaveBufferedChunk = 1
+	ADDS	r0, r0, #MAX_VOICES_PER_CHUNK<<16      @ nTotalVoxRem -= VOICES_PER_CHUNK?
+	LDRCC	r1, =uSGE_Driver_Update_NextChunk+1    @  Do another chunk as needed
+	BXCC	r1
+#endif
 	LDMFD	sp!, {r4-fp,lr}
 	BX	lr
 
@@ -381,21 +641,21 @@ ASM_LITPOOL
 
 .LMixLoop_BlockLoop_Clip_r0:
 	MixLoop_BlockClip r0
-	B	.LMixLoop_BlockLoop_ClipReturn_r0
+	B	.LMixerArea_StoreArea + (.LLoadMixerOpcodes_ClipReturn_r0 - .LLoadMixerOpcodes_MergeStoreLoop)
 
 .LMixLoop_BlockLoop_Clip_r1:
 	MixLoop_BlockClip r1
-	B	.LMixLoop_BlockLoop_ClipReturn_r1
+	B	.LMixerArea_StoreArea + (.LLoadMixerOpcodes_ClipReturn_r1 - .LLoadMixerOpcodes_MergeStoreLoop)
 
 #if USGE_STEREOMIX
 
 .LMixLoop_BlockLoop_Clip_r2:
 	MixLoop_BlockClip r2
-	B	.LMixLoop_BlockLoop_ClipReturn_r2
+	B	.LMixerArea_StoreArea + (.LLoadMixerOpcodes_ClipReturn_r2 - .LLoadMixerOpcodes_MergeStoreLoop)
 
 .LMixLoop_BlockLoop_Clip_r3:
 	MixLoop_BlockClip r3
-	B	.LMixLoop_BlockLoop_ClipReturn_r3
+	B	.LMixerArea_StoreArea + (.LLoadMixerOpcodes_ClipReturn_r3 - .LLoadMixerOpcodes_MergeStoreLoop)
 
 #endif
 
@@ -406,19 +666,27 @@ ASM_LITPOOL
 ASM_FUNC_END(uSGE_Driver_Mixer)
 
 /************************************************/
-#ifndef SMALL_VOXTABLE
-/************************************************/
 
 ASM_DATA_GLOBAL(uSGE_Driver_VoxTable)
 ASM_DATA_BEG   (uSGE_Driver_VoxTable, ASM_DATASECT_BSS;ASM_ALIGN(4))
 
 uSGE_Driver_VoxTable:
-	.space USGE_MAX_VOICES * USGE_VOXTABLE_ENTRY_SIZE
+	.space MAX_VOICES_PER_CHUNK * USGE_VOXTABLE_ENTRY_SIZE
 
 ASM_DATA_END(uSGE_Driver_VoxTable)
 
 /************************************************/
-#endif
+
+ASM_DATA_BEG(uSGE_Driver_MixerArea, ASM_DATASECT_BSS;ASM_ALIGN(4))
+
+uSGE_Driver_MixerArea:
+.LMixerArea_VoxArea:
+	.space (MAX_VOICES_PER_CHUNK * STRIDE_BETWEEN_VOICES)
+.LMixerArea_StoreArea:
+	.space (.LLoadMixerOpcodes_MergeStoreLoop_End - .LLoadMixerOpcodes_MergeStoreLoop)
+
+ASM_DATA_END(uSGE_Driver_MixerArea)
+
 /************************************************/
 
 ASM_DATA_BEG(uSGE_Driver_SilentLoop, ASM_DATASECT_RODATA;ASM_ALIGN(1))

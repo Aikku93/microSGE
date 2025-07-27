@@ -17,7 +17,7 @@
 #define USGE_DRIVER_STATE_MAGIC   0x656773 //! "sge"
 #define USGE_DRIVER_STATE_READY  (0x00 | USGE_DRIVER_STATE_MAGIC<<8)
 #define USGE_DRIVER_STATE_PAUSED (0x80 | USGE_DRIVER_STATE_MAGIC<<8)
-#define USGE_DRIVER_HEADER_SIZE   0x10
+#define USGE_DRIVER_HEADER_SIZE   0x14
 #define USGE_VOX_SIZE             0x18
 
 /************************************************/
@@ -90,11 +90,15 @@ struct USGE_PTRALIGNED USGE_PACKED uSGE_Vox_t {
 	const struct uSGE_Wav_t *Wav;  //! [14h] Linked waveform
 };
 
-//! Driver structure [10h + 18h*VoxCnt + (1+USGE_STEREOMIX)*BfCnt*BufLen bytes]
+//! Driver structure [14h + 18h*VoxCnt + (1+USGE_STEREOMIX)*BfCnt*BufLen bytes]
 //! Immediately following the voices are the output buffers.
 //! Notes:
 //!  -EnvMul = BufLen * 1626 * 2^16 / RateHz
 //!   This is only used when USGE_FIXED_RATE is disabled.
+//!  -MixBuf is a pointer to the mixing area. This is only used when
+//!   mixing more than USGE_MAX_CHUNK_VOICES voices at once.
+//!   The size of this buffer should be int32_t[BufLen] in stereo mode,
+//!   or int16_t[BufLen] in mono mode, and must be aligned to 32 bits.
 struct USGE_PTRALIGNED USGE_PACKED uSGE_Driver_t {
 	uint32_t State;  //! [00h] Driver state flags
 	uint8_t  BfIdxR; //! [04h] Buffer index (currently playing)
@@ -104,6 +108,7 @@ struct USGE_PTRALIGNED USGE_PACKED uSGE_Driver_t {
 	uint16_t RateHz; //! [08h] Sampling rate (in Hz)
 	uint16_t BufLen; //! [0Ah] Length of each buffer (in samples)
 	uint32_t EnvMul; //! [0Ch] Envelope scaling constant
+	void    *MixBuf; //! [10h] Mixer buffer pointer
 	struct uSGE_Vox_t Vox[0];
 };
 USGE_FORCE_INLINE
@@ -126,7 +131,7 @@ uint32_t uSGE_Driver_GetWorkAreaSize(uint8_t VoxCnt, uint8_t BufCnt, uint16_t Bu
 
 /************************************************/
 
-//! uSGE_Driver_Open(Driver, VoxCnt, RateHz, BufCnt, BufLen)
+//! uSGE_Driver_Open(Driver, VoxCnt, RateHz, BufCnt, BufLen, MixBuf)
 //! Description: Initialize SGE driver.
 //! Arguments:
 //!   Driver: Driver work area.
@@ -134,6 +139,7 @@ uint32_t uSGE_Driver_GetWorkAreaSize(uint8_t VoxCnt, uint8_t BufCnt, uint16_t Bu
 //!   RateHz: Sampling rate (in Hz).
 //!   BufCnt: Number of output buffers.
 //!   BufLen: Number of samples per buffer.
+//!   MixBuf: Pointer to mixing buffer.
 //! Returns: On success, returns a non-zero value. On failure, returns 0.
 //! Notes:
 //!  -BufLen must be a multiple of 8.
@@ -143,12 +149,15 @@ uint32_t uSGE_Driver_GetWorkAreaSize(uint8_t VoxCnt, uint8_t BufCnt, uint16_t Bu
 //!  -The driver takes over DMA channels 1+2 and a timer (see USGE_HWTIMER_IDX).
 //!  -It is only possible to have one driver open at any time. Multiple drivers
 //!   can be initialized, but only one can be active at any given time.
+//!  -MixBuf is only required with VoxCnt > USGE_MAX_CHUNK_VOICES. Otherwise,
+//!   NULL can be passed instead.
 uint32_t uSGE_Driver_Open(
 	struct uSGE_Driver_t *Driver,
 	uint8_t  VoxCnt,
 	uint16_t RateHz,
 	uint8_t  BufCnt,
-	uint16_t BufLen
+	uint16_t BufLen,
+	void    *MixBuf
 );
 
 //! uSGE_Driver_Sync(Driver)

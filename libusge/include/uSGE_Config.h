@@ -37,9 +37,16 @@
 #define USGE_FIXED_RATE 280896
 
 //! Maximum number of voices
-//! Maximum 38 voices for stereo, or 45 voices for mono.
-//! Setting this to 8 voices or less has slight performance benefits.
-#define USGE_MAX_VOICES 32
+//! This is limited to 127 voices by the implementation requirements,
+//! and there is no performance or memory penalty for settings this
+//! to the maximum.
+#define USGE_MAX_VOICES 127
+
+//! Maximum number of voices per chunk
+//! Maximum of 8 voices per chunk, or ADR can't reach the voice.
+//! Setting this lower reduces memory usage in the mixer loop,
+//! but adds a performance hit for every multiple of N voices.
+#define USGE_MAX_CHUNK_VOICES 8
 
 //! Fractional position accuracy
 //! This is limited by our maximum Rate of 4.0-eps, which requires
@@ -62,7 +69,7 @@
 //! If Ratio == 0, then adaptive subdivision is disabled and
 //! subdividing always happens at the finest granularity.
 #define USGE_VOLSUBDIV       3
-#define USGE_VOLSUBDIV_RATIO 2
+#define USGE_VOLSUBDIV_RATIO 3
 
 /************************************************/
 
@@ -79,12 +86,11 @@
 #if (USGE_STEREOMIX < 0 || USGE_STEREOMIX > 1)
 # error "USGE_STEREOMIX must be 0 or 1."
 #endif
-#if (USGE_MAX_VOICES < 1 || (USGE_STEREOMIX && USGE_MAX_VOICES > 38) || (!USGE_STEREOMIX && USGE_MAX_VOICES > 45))
-# if USGE_STEREOMIX
-#  error "USGE_MAX_VOICES must be >= 1 and <= 38."
-# else
-#  error "USGE_MAX_VOICES must be >= 1 and <= 45."
-# endif
+#if (USGE_MAX_VOICES < 1 || USGE_MAX_VOICES > 127)
+# error "USGE_MAX_VOICES must be >= 1 and <= 127."
+#endif
+#if (USGE_MAX_CHUNK_VOICES < 1 || USGE_MAX_CHUNK_VOICES > 8)
+# error "USGE_MAX_CHUNK_VOICES must be >= 1 and <= 8."
 #endif
 #if (USGE_FRACBITS < 11 || USGE_FRACBITS > 14)
 # error "USGE_FRACBITS must be >= 11, and <= 14."
@@ -95,8 +101,8 @@
 #if (USGE_VOLSUBDIV > 4)
 # error "USGE_VOLSUBDIV must be <= 4."
 #endif
-#if (USGE_VOLSUBDIV_RATIO > 3)
-# error "USGE_VOLSUBDIV_RATIO must be <= 3."
+#if (USGE_VOLSUBDIV_RATIO > 6)
+# error "USGE_VOLSUBDIV_RATIO must be <= 6."
 #endif
 
 /************************************************/

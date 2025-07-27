@@ -24,25 +24,73 @@ ASM_MODE_THUMB
 	PUSH	{r4-r5}                   @ Push {Driver,N}
 
 /************************************************/
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+/************************************************/
+
+.LVoxUpdate_GetTotalActiveVoices:
+	MOV	sl, r1                    @ Store 0 to chunking information, in case we have no voices.
+0:	MOV	r0, #0x01<<7              @ * This allows the buffer index to update, since we check sl.
+	LDRB	r7, [r4, #0x06]           @ nActiveVox | -nVoxRem<<7 -> r7, &Vox[] -> r4
+	NEG	r7, r7
+	LSL	r7, #0x07
+	ADD	r4, #USGE_DRIVER_HEADER_SIZE
+1:	LDRB	r1, [r4]                  @ nActiveVox += !!(Vox[i].Stat & ACTIVE)
+	ADD	r4, #USGE_VOX_SIZE
+	LSR	r1, #0x08
+	ADC	r7, r0                    @ --nVoxRem?
+	BCC	1b
+2:	BEQ	.LMixer_Enter             @ If we have no voices, skip update loop
+	NEG	r7, r7                    @ HaveBufferedChunk(=0) | VoxOffs(=0)<<1 | -nTotalVoxRem<<16 -> r0
+	LSL	r0, r7, #0x10
+
+ASM_FUNC_GLOBAL(uSGE_Driver_Update_NextChunk)
+uSGE_Driver_Update_NextChunk:
+	LDR	r4, [sp, #0x00]           @ Reload &Driver -> r4
+#if (USGE_VOLSUBDIV && USGE_VOLSUBDIV_RATIO)
+	MOV	r1, #0x00                 @ r1=0 for SubdivLevel = 0
+#endif
+
+/************************************************/
+#endif
+/************************************************/
 
 .LVoxUpdateLoop_Enter:
-	LDR	r0, =uSGE_Driver_VoxTable
+	LDR	r2, =uSGE_Driver_VoxTable
 #if (USGE_VOLSUBDIV && USGE_VOLSUBDIV_RATIO)
 	MOV	r9, r1                    @ SubdivLevel = 0
 #endif
-	MOV	r8, r0                    @ &VoxTable[] -> r8
+	MOV	r8, r2                    @ &VoxTable[] -> r8
 	LDRB	r7, [r4, #0x06]           @ &Vox[] -> r4, nActiveVox=0|-nVoxRem<<7 -> r7
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	MOV	sl, r0                    @ Save chunking information to sl
+	LSL	r2, r0, #0x10             @ nVoxRem -= VoxOffs
+	LSR	r2, #0x10+1
+	SUB	r7, r2
+	MOV	r0, #USGE_VOX_SIZE        @ Seek &Vox[] by VoxOffs
+	MUL	r2, r0
+	ADD	r4, r2
+#endif
 	NEG	r7, r7
 	LSL	r7, #0x07
 	ADD	r4, #USGE_DRIVER_HEADER_SIZE
 
 .LVoxUpdateLoop:
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	LSL	r0, r7, #(32-7)           @ Have enough active voices for a chunk?
+	LSR	r0, #(32-7)
+	CMP	r0, #USGE_MAX_CHUNK_VOICES
+	BCS	.LMixer_Enter
+#endif
 	LDRB	r6, [r4, #0x00]           @ Stat -> r6
 	LSL	r0, r6, #(32-7)           @ C=ACTIVE, N=KEYON?
 	BCS	uSGE_Driver_VoiceUpdate
 	SUB	r7, #0x01                 @  Voice is inactive: --nActiveVox, be cause we do ++nActiveVox next
 
 .LVoxUpdateLoop_Tail:
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	MOV	r0, #0x01 << 1            @ VoxOffs++
+	ADD	sl, r0
+#endif
 	ADD	r4, #USGE_VOX_SIZE        @ Move to next voice
 	ADD	r7, #0x01 + 0x01<<7       @ ++nActiveVox, --nVoxRem?
 	BCC	.LVoxUpdateLoop
@@ -50,22 +98,52 @@ ASM_MODE_THUMB
 /************************************************/
 
 .LMixer_Enter:
-	POP	{r5,r6}                   @ Pop {Driver -> r5, N -> r6}
-	LDRB	r0, [r5, #0x07]           @ BfIdxW -> r0
-	LDRB	r1, [r5, #0x05]           @ BfCnt -> r1
-	ADD	r2, r0, #0x01             @ BfIdxW = WRAP(BfIdxW+1) -> r2
-0:	SUB	r2, r1
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	LSL	r7, #(32-7)               @ Clear nVoxRem
+	LSR	r7, #(32-7)
+	MOV	r2, sl                    @ We only need to calculate DstBuffer on the last chunk
+	ASR	r2, #0x10
+	ADD	r2, #USGE_MAX_CHUNK_VOICES
+	ADD	r2, sp, #0x00             @ Load {Driver -> r2, N -> r6}
+	LDMIA	r2, {r2,r6}
+	BMI	3f
+	ADD	sp, #0x08                 @ Pop stack on last chunk
+#else
+	POP	{r2,r6}                   @ Pop {Driver -> r2, N -> r6}
+#endif
+	LDRB	r0, [r2, #0x07]           @ BfIdxW -> r0
+	LDRB	r1, [r2, #0x05]           @ BfCnt -> r1
+	ADD	r5, r0, #0x01             @ BfIdxW = WRAP(BfIdxW+1) -> r5
+0:	SUB	r5, r1
 	BCS	0b
-0:	ADD	r2, r1
-	STRB	r2, [r5, #0x07]
-	MUL	r0, r6                    @ BufferOffs = BfIdxW*BufLen -> r0
+0:	ADD	r5, r1
+	STRB	r5, [r2, #0x07]
+1:	MUL	r0, r6                    @ BufferOffs = BfIdxW*BufLen -> r0
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	LDRB	r4, [r2, #0x06]           @ Seek past voices to buffer, because we might not
+	MOV	r5, #USGE_VOX_SIZE        @ always end up on the last voice before mixing
+	MUL	r4, r5
+	ADD	r4, r2
+	ADD	r4, #USGE_DRIVER_HEADER_SIZE
+#endif
 	ADD	r4, r0                    @ DstBufferL = BufferStart + BufferOffs -> r4
 #if USGE_STEREOMIX
 	MUL	r1, r6                    @ DstBufferR = DstBufferL + BfCnt*BufLen -> r5
 	ADD	r5, r4, r1
 #endif
-1:	MOV	r1, r7                    @ Did we have any voices?
+2:	MOV	r1, r7                    @ Did we have any voices?
 	BEQ	.LMixer_NoVoices          @  N: Clear buffers
+3:
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	MOV	r0, sl                    @ ChunkInfo -> r0
+# if USGE_STEREOMIX
+	LDR	r2, [r2, #0x10]           @ Push {ChunkInfo,&MixBuffer[]}
+	PUSH	{r0,r2}
+# else
+	PUSH	{r0}                      @ Push ChunkInfo
+	LDR	r5, [r2, #0x10]           @ MixBuf -> r5
+# endif
+#endif
 10:	LDR	r0, =uSGE_Driver_Mixer    @  Y: Invoke mixer
 	BX	r0
 
@@ -332,7 +410,9 @@ ASM_ALIGN(4)
 	NEG	r7, r7
 0:	CMP	r5, r7                    @ ABS(VolStepR) > ABS(VolStepL)?
 	BLS	1f
-	LSL	r0, r7, #0x18             @  Y: LoVol = NewVolR
+	MOV	r0, r8
+	LDR	r0, [r0, #0x1C]
+	LSL	r0, #0x08                 @  Y: LoVol = NewVolR
 	ADD	r0, r6
 	LSR	r0, #0x18
 	LSR	r1, r6, #0x18             @     HiVol = OldVolR
@@ -344,8 +424,15 @@ ASM_ALIGN(4)
 1:	MOV	r6, #0x00                 @ ThisSubdivLevel = 0 -> r6
 	ADD	r0, #0x03                 @ <- Adding a bias here helps avoid excessive subdivision for
 	ADD	r1, #0x03                 @    very low volumes, where the stepping is inaudible anyway
-10:	ADD	r7, r1, #(1<<USGE_VOLSUBDIV_RATIO)-1
+10:
+#  if (USGE_VOLSUBDIV_RATIO <= 3)
+	ADD	r7, r1, #(1<<USGE_VOLSUBDIV_RATIO)-1
 	LSR	r7, r1, #USGE_VOLSUBDIV_RATIO
+#  else
+	SUB	r7, r1, #0x01
+	LSR	r7, #USGE_VOLSUBDIV_RATIO
+	ADD	r7, #0x01
+#  endif
 	SUB	r1, r7                    @ HiVol *= 1-2^-RATIO
 	CMP	r1, r0                    @ HiVol > LoVol?
 	BLS	2f
