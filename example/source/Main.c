@@ -101,6 +101,19 @@ int main(void) {
 	irqSet(IRQ_VBLANK, VBlankFunc);
 	irqEnable(IRQ_VBLANK);
 	consoleDemoInit();
+#if 0 //! Why is WAITCNT not exposed?!
+	REG_WAITCNT = (REG_WAITCNT &~ (
+	                REG_WAITCNT_WS0_N_MASK |
+	                REG_WAITCNT_WS0_S_MASK |
+	                REG_WAITCNT_PREFETCH
+	               )
+	              ) |
+	              REG_WAITCNT_WS0_N_3c |
+	              REG_WAITCNT_WS0_S_1c |
+	              REG_WAITCNT_PREFETCH ;
+#else
+	*(volatile uint16_t*)0x04000204 = (*(volatile uint16_t*)0x04000204 &~ 0x401C) | 0x4014;
+#endif
 
 	//! Verify driver size
 	uint32_t ActualDriverSize = GetDriverSize();

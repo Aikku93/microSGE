@@ -9,12 +9,15 @@ The idea is to use this as the synthesizer for a music playback system.
 ## Features
 
 * Self-modifying mixing loops and mixing inside registers for extreme performance
-  * ~2.5% CPU per voice @ 31536Hz using default waitstates (stereo, with 1/8 dynamic subdividing volume ramping)
-    * ~2.2% CPU per voice in mono mode, with all else being equal
+  * ~2.2% CPU per voice @ 31536Hz using N=3,S=1 waitstates (stereo, with 1/8 dynamic subdividing volume ramping)
+    * ~1.9% CPU per voice in mono mode, with all else being equal
+  * CPU usage will jump by 0.5-1.0% CPU for every N voices (where N is `USGE_MAX_CHUNK_VOICES`)
 * Highly-customizable build options (mono/stereo output, maximum voice count, etc.)
 * AHDSR envelope generator
   * Can be overriden in "manual" mode if desired
 * Volume ramping (by slicing a mix chunk into 2^N pieces or less, as needed)
+* Not-too-horrible IWRAM usage
+  * A bit over 3KiB for the base (plus the mixer buffer if required)
 
 ## Limitations/Caveats/Notes
 
