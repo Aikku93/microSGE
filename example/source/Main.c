@@ -14,14 +14,15 @@
 /************************************************/
 
 #define SAMPRATE_HZ 31536
-#define N_VOICES    16
+#define N_VOICES    24
 #define NBUFFERS    2
 #define BUFLENGTH   528
 
 /************************************************/
 
 //! Use uSGE_Driver_GetWorkAreaSize() to get this area size!
-uint8_t DriverArea[2512] EWRAM_BSS ALIGN(4);
+uint8_t DriverArea[2708] EWRAM_BSS ALIGN(4);
+uint8_t MixBuffer[BUFLENGTH*4] ALIGN(4);
 static inline struct uSGE_Driver_t *GetDriver(void) {
 	return (struct uSGE_Driver_t*)DriverArea;
 }
@@ -33,7 +34,7 @@ static uint32_t GetDriverSize(void) {
 }
 
 static int OpenDriver(void) {
-	uint32_t Result = uSGE_Driver_Open(GetDriver(), N_VOICES, SAMPRATE_HZ, NBUFFERS, BUFLENGTH);
+	uint32_t Result = uSGE_Driver_Open(GetDriver(), N_VOICES, SAMPRATE_HZ, NBUFFERS, BUFLENGTH, MixBuffer);
 	return (Result != 0);
 }
 

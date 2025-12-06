@@ -9,6 +9,7 @@
 @ r2:  RateHz
 @ r3:  BufCnt
 @ sp+00h: BufLen
+@ sp+04h: MixBuf
 
 ASM_FUNC_GLOBAL(uSGE_Driver_Open)
 ASM_FUNC_BEG   (uSGE_Driver_Open, ASM_FUNCSECT_TEXT;ASM_MODE_THUMB)
@@ -45,12 +46,29 @@ uSGE_Driver_Open:
 	MUL	r3, r4                         @ BufSize = BufLen*BufCnt -> r3
 	LSL	r3, #(32-4)                    @ BufSize must be a multiple of 16 samples
 	BNE	.LExit_Error
+#if (USGE_MAX_VOICES > USGE_MAX_CHUNK_VOICES)
+	CMP	r1, #USGE_MAX_CHUNK_VOICES     @ Need a mix buffer?
+	BLS	0f
+	LDR	r2, [sp, #0x10]                @  Y: MixBuf -> r4?
+	CMP	r2, #0x00
+	BEQ	.LExit_Error
+	LSL	r3, r2, #(32-2)                @   Y: Aligned to 32-bit?
+	BNE	.LExit_Error
+	STR	r2, [r0, #0x10]                @    Y: Store MixBuf
+#endif
 0:	MOV	r2, #USGE_VOX_SIZE             @ Clear voices
 	MUL	r2, r1
 	MOV	r1, #0x00
-	ADD	r0, #0x10
+	ADD	r0, #USGE_DRIVER_HEADER_SIZE
 	BL	memset
-	SUB	r0, #0x10
+	SUB	r0, #USGE_DRIVER_HEADER_SIZE
+0:	LDR	r2, =uSGE_Driver_MixerIsLoaded @ Load mixer as needed
+	LDRB	r3, [r2]
+	SUB	r3, #0x01
+	BCS	0f
+	STRB	r3, [r2]
+	BL	uSGE_Driver_LoadMixer
+0:
 #if !USGE_FIXED_RATE
 	MOV	r5, r0
 	LDR	r0, =1626                      @ Store EnvMul = BufLen * 1626 * 2^16 / RateHz
@@ -80,6 +98,14 @@ uSGE_Driver_Open:
 	B	.LExit
 
 ASM_FUNC_END(uSGE_Driver_Open)
+
+/************************************************/
+
+ASM_DATA_BEG(uSGE_Driver_MixerIsLoaded, ASM_DATASECT_DATA;ASM_ALIGN(1))
+
+uSGE_Driver_MixerIsLoaded: .byte 0 @ This changes to FFh after mixer is loaded
+
+ASM_DATA_END(uSGE_Driver_MixerIsLoaded)
 
 /************************************************/
 //! EOF
